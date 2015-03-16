@@ -1,0 +1,1 @@
+// File: prob0612.cpp// Computer Systems, Fourth Edition// Problem 6.12#include <iostream>using namespace std;const int limit = 5;int main () {   int number;   cin >> number;   while (number < limit) {      number++;      cout << number << ' ';   }   return 0;}

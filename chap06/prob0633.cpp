@@ -1,0 +1,1 @@
+// File: prob0633.cpp// Computer Systems, Fourth Edition// Problem 6.33#include <iostream>using namespace std;int main () {   int guess;   cout << "Pick a number 0..3: ";   cin >> guess;   switch (guess) {      case 0: case 1: cout << "Too low"; break;      case 2: cout << "Right on"; break;      case 3: cout << "Too high";   }   cout << endl;   return 0;}

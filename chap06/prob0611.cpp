@@ -1,0 +1,1 @@
+// File: prob0611.cpp// Computer Systems, Fourth Edition// Problem 6.11#include <iostream>using namespace std;int main () {   int number;   cin >> number;   if (number % 2 == 0) {      cout << "Even\n";   }   else {      cout << "Odd\n";   }   return 0;}

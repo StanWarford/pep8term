@@ -1,0 +1,1 @@
+// File: prob0613.cpp// Computer Systems, Fourth Edition// Problem 6.13#include <iostream>using namespace std;int main () {   char ch;   cin >> ch;   if ((ch >= 'A') && (ch <= 'Z')) {      cout << 'A';   }   else if ((ch >= 'a') && (ch <= 'z')) {      cout << 'a';   }   else {      cout << '$';   }   cout << endl;   return 0;}

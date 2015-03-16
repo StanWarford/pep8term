@@ -1,0 +1,1 @@
+// File: prob0615.cpp// Computer Systems, Fourth Edition// Problem 6.15#include <iostream>using namespace std;int main () {   int numItms, j, data, sum;   cin >> numItms;   sum = 0;   for (j = 1; j <= numItms; j++) {      cin >> data;      sum += data;   }   cout << "Sum: " << sum << endl;   return 0;}

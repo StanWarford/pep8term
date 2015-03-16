@@ -1,0 +1,555 @@
+-------------------------------------------------------------------------------
+      Object
+Addr  code   Symbol   Mnemon  Operand       Comment
+-------------------------------------------------------------------------------
+             ;******* Pep/8 Operating System, 2004/08/30
+             ;
+             TRUE:    .EQUATE 1             
+             FALSE:   .EQUATE 0             
+             ;
+             ;******* Operating system RAM
+FBCF         osRAM:   .BLOCK  128           ;System stack area
+FC4F         wordBuff:.BLOCK  1             ;Input/output buffer
+FC50         byteBuff:.BLOCK  1             ;Least significant byte of wordBuff
+FC51         wordTemp:.BLOCK  1             ;Temporary word storage
+FC52         byteTemp:.BLOCK  1             ;Least significant byte of tempWord
+FC53         addrMask:.BLOCK  2             ;Addressing mode mask
+FC55         opAddr:  .BLOCK  2             ;Trap instruction operand address
+             ;
+             ;******* Operating system ROM
+FC57                  .BURN   0xFFFF        
+             ;
+             ;******* System Loader
+             ;Data must be in the following format: 
+             ;Each hex number representing a byte must contain exactly two
+             ;characters. Each character must be in 0..9, A..F, or a..f and
+             ;must be followed by exactly one space. There must be no
+             ;leading spaces at the beginning of a line and no trailing
+             ;spaces at the end of a line. The last two characters in the
+             ;file must be lowercase zz, which is used as the terminating
+             ;sentinel by the loader.
+             ;
+FC57  C80000 loader:  LDX     0,i           ;X := 0
+FC5A  E9FC4F          STX     wordBuff,d    ;Clear input buffer word
+             ;
+FC5D  49FC50 getChar: CHARI   byteBuff,d    ;Get first hex character
+FC60  C1FC4F          LDA     wordBuff,d    ;Put ASCII into low byte of A
+FC63  B0007A          CPA     'z',i         ;If end of file sentinel 'z'
+FC66  0AFC9A          BREQ    stopLoad      ;then exit loader routine
+FC69  B00039          CPA     '9',i         ;If characer <= '9', assume decimal
+FC6C  06FC72          BRLE    shift         ;and right nybble is correct digit
+FC6F  700009          ADDA    9,i           ;else convert nybble to correct dig
+FC72  1C     shift:   ASLA                  ;Shift left by four bits to send
+FC73  1C              ASLA                  ;the digit to the most significant
+FC74  1C              ASLA                  ;position in the byte
+FC75  1C              ASLA                  
+FC76  F1FC52          STBYTEA byteTemp,d    ;Save the most significant nybble
+FC79  49FC50          CHARI   byteBuff,d    ;Get second hex character
+FC7C  C1FC4F          LDA     wordBuff,d    ;Put ASCII into low byte of A
+FC7F  B00039          CPA     '9',i         ;If characer <= '9', assume decimal
+FC82  06FC88          BRLE    combine       ;and right nybble is correct digit
+FC85  700009          ADDA    9,i           ;else convert nybble to correct dig
+FC88  90000F combine: ANDA    0x000F,i      ;Mask out the left nybble
+FC8B  A1FC51          ORA     wordTemp,d    ;Combine both hex digits in binary
+FC8E  F50000          STBYTEA 0,x           ;Store in Mem[X]
+FC91  780001          ADDX    1,i           ;X := X + 1
+FC94  49FC50          CHARI   byteBuff,d    ;Skip blank or <LF>
+FC97  04FC5D          BR      getChar       ;
+             ;
+FC9A  00     stopLoad:STOP                  ;
+             ;
+             ;******* Trap handler
+             oldIR:   .EQUATE 9             ;Stack address of IR on trap
+             ;
+FC9B  C80000 trap:    LDX     0,i           ;Clear X for a byte compare
+FC9E  DB0009          LDBYTEX oldIR,s       ;X := trapped IR
+FCA1  B80028          CPX     0x0028,i      ;If X >= first nonunary trap opcode
+FCA4  0EFCB7          BRGE    nonUnary      ;trap opcode is nonunary
+             ;
+FCA7  980003 unary:   ANDX    0x0003,i      ;Mask out all but rightmost two bit
+FCAA  1D              ASLX                  ;An address is two bytes
+FCAB  17FCAF          CALL    unaryJT,x     ;Call unary trap routine
+FCAE  01              RETTR                 ;Return from trap
+             ;
+FCAF  FDB6   unaryJT: .ADDRSS opcode24      ;Address of NOP0 subroutine
+FCB1  FDB7            .ADDRSS opcode25      ;Address of NOP1 subroutine
+FCB3  FDB8            .ADDRSS opcode26      ;Address of NOP2 subroutine
+FCB5  FDB9            .ADDRSS opcode27      ;Address of NOP3 subroutine
+             ;
+FCB7  1F     nonUnary:ASRX                  ;Trap opcode is nonunary
+FCB8  1F              ASRX                  ;Discard addressing mode bits
+FCB9  1F              ASRX                  
+FCBA  880005          SUBX    5,i           ;Adjust so that NOP opcode = 0
+FCBD  1D              ASLX                  ;An address is two bytes
+FCBE  17FCC2          CALL    nonUnJT,x     ;Call nonunary trap routine
+FCC1  01     return:  RETTR                 ;Return from trap
+             ;
+FCC2  FDBA   nonUnJT: .ADDRSS opcode28      ;Address of NOP subroutine
+FCC4  FDC4            .ADDRSS opcode30      ;Address of DECI subroutine
+FCC6  FF3B            .ADDRSS opcode38      ;Address of DECO subroutine
+FCC8  FFC6            .ADDRSS opcode40      ;Address of STRO subroutine
+             ;
+             ;******* Assert valid trap addressing mode
+             oldIR4:  .EQUATE 13            ;oldIR + 4 with two return addresse
+FCCA  C00001 assertAd:LDA     1,i           ;A := 1
+FCCD  DB000D          LDBYTEX oldIR4,s      ;X := OldIR
+FCD0  980007          ANDX    0x0007,i      ;Keep only the addressing mode bits
+FCD3  0AFCDD          BREQ    testAd        ;000 = immediate addressing
+FCD6  1C     loop:    ASLA                  ;Shift the 1 bit left
+FCD7  880001          SUBX    1,i           ;Subtract from addressing mode coun
+FCDA  0CFCD6          BRNE    loop          ;Try next addressing mode
+FCDD  91FC53 testAd:  ANDA    addrMask,d    ;AND the 1 bit with legal modes
+FCE0  0AFCE4          BREQ    addrErr       
+FCE3  58              RET0                  ;Legal addressing mode, return
+FCE4  50000A addrErr: CHARO   '\n',i        
+FCE7  C0FCF4          LDA     trapMsg,i     ;Push address of error message
+FCEA  E3FFFE          STA     -2,s          
+FCED  680002          SUBSP   2,i           ;Call print subroutine
+FCF0  16FFE2          CALL    prntMsg       
+FCF3  00              STOP                  ;Halt: Fatal runtime error
+FCF4  455252 trapMsg: .ASCII  "ERROR: Invalid trap addressing mode.\x00" 
+      4F523A 
+      20496E 
+      76616C 
+      696420 
+      747261 
+      702061 
+      646472 
+      657373 
+      696E67 
+      206D6F 
+      64652E 
+      00     
+             ;
+             ;******* Set address of trap operand
+             oldX4:   .EQUATE 7             ;oldX + 4 with two return addresses
+             oldPC4:  .EQUATE 9             ;oldPC + 4 with two return addresse
+             oldSP4:  .EQUATE 11            ;oldSP + 4 with two return addresse
+FD19  DB000D setAddr: LDBYTEX oldIR4,s      ;X := old instruction register
+FD1C  980007          ANDX    0x0007,i      ;Keep only the addressing mode bits
+FD1F  1D              ASLX                  ;An address is two bytes
+FD20  05FD23          BR      addrJT,x      
+FD23  FD33   addrJT:  .ADDRSS addrI         ;Immediate addressing
+FD25  FD3D            .ADDRSS addrD         ;Direct addressing
+FD27  FD4A            .ADDRSS addrN         ;Indirect addressing
+FD29  FD5A            .ADDRSS addrS         ;Stack relative addressing
+FD2B  FD6A            .ADDRSS addrSF        ;Stack relative deferred addressing
+FD2D  FD7D            .ADDRSS addrX         ;Indexed addressing
+FD2F  FD8D            .ADDRSS addrSX        ;Stack indexed addressing
+FD31  FDA0            .ADDRSS addrSXF       ;Stack indexed deferred addressing
+             ;
+FD33  CB0009 addrI:   LDX     oldPC4,s      ;Immediate addressing
+FD36  880002          SUBX    2,i           ;Oprnd = OprndsSpec
+FD39  E9FC55          STX     opAddr,d      
+FD3C  58              RET0                  
+             ;
+FD3D  CB0009 addrD:   LDX     oldPC4,s      ;Direct addressing
+FD40  880002          SUBX    2,i           ;Oprnd = Mem[OprndSpec]
+FD43  CD0000          LDX     0,x           
+FD46  E9FC55          STX     opAddr,d      
+FD49  58              RET0                  
+             ;
+FD4A  CB0009 addrN:   LDX     oldPC4,s      ;Indirect addressing
+FD4D  880002          SUBX    2,i           ;Oprnd = Mem[Mem[OprndSpec]]
+FD50  CD0000          LDX     0,x           
+FD53  CD0000          LDX     0,x           
+FD56  E9FC55          STX     opAddr,d      
+FD59  58              RET0                  
+             ;         
+FD5A  CB0009 addrS:   LDX     oldPC4,s      ;Stack relative addressing
+FD5D  880002          SUBX    2,i           ;Oprnd = Mem[SP + OprndSpec]
+FD60  CD0000          LDX     0,x           
+FD63  7B000B          ADDX    oldSP4,s      
+FD66  E9FC55          STX     opAddr,d      
+FD69  58              RET0                  
+             ;
+FD6A  CB0009 addrSF:  LDX     oldPC4,s      ;Stack relative deferred addressing
+FD6D  880002          SUBX    2,i           ;Oprnd = Mem[Mem[SP + OprndSpec]]
+FD70  CD0000          LDX     0,x           
+FD73  7B000B          ADDX    oldSP4,s      
+FD76  CD0000          LDX     0,x           
+FD79  E9FC55          STX     opAddr,d      
+FD7C  58              RET0                  
+             ;
+FD7D  CB0009 addrX:   LDX     oldPC4,s      ;Indexed addressing
+FD80  880002          SUBX    2,i           ;Oprnd = Mem[OprndSpec + X]
+FD83  CD0000          LDX     0,x           
+FD86  7B0007          ADDX    oldX4,s       
+FD89  E9FC55          STX     opAddr,d      
+FD8C  58              RET0                  
+             ;
+FD8D  CB0009 addrSX:  LDX     oldPC4,s      ;Stack indexed addressing
+FD90  880002          SUBX    2,i           ;Oprnd = Mem[SP + OprndSpec + X]
+FD93  CD0000          LDX     0,x           
+FD96  7B0007          ADDX    oldX4,s       
+FD99  7B000B          ADDX    oldSP4,s      
+FD9C  E9FC55          STX     opAddr,d      
+FD9F  58              RET0                  
+             ;
+FDA0  CB0009 addrSXF: LDX     oldPC4,s      ;Stack indexed deferred addressing
+FDA3  880002          SUBX    2,i           ;Oprnd = Mem[Mem[SP + OprndSpec] + 
+FDA6  CD0000          LDX     0,x           
+FDA9  7B000B          ADDX    oldSP4,s      
+FDAC  CD0000          LDX     0,x           
+FDAF  7B0007          ADDX    oldX4,s       
+FDB2  E9FC55          STX     opAddr,d      
+FDB5  58              RET0                  
+             ;
+             ;******* Opcode 0x24
+             ;The NOP0 instruction.
+FDB6  58     opcode24:RET0                  
+             ;
+             ;******* Opcode 0x25
+             ;The NOP1 instruction.
+FDB7  58     opcode25:RET0                  
+             ;
+             ;******* Opcode 0x26
+             ;The NOP2 instruction.
+FDB8  58     opcode26:RET0                  
+             ;
+             ;******* Opcode 0x27
+             ;The NOP3 instruction.
+FDB9  58     opcode27:RET0                  
+             ;
+             ;******* Opcode 0x28
+             ;The NOP instruction.
+FDBA  C00001 opcode28:LDA     0x0001,i      ;Assert i
+FDBD  E1FC53          STA     addrMask,d    
+FDC0  16FCCA          CALL    assertAd      
+FDC3  58              RET0                  
+             ;
+             ;******* Opcode 0x30
+             ;The DECI instruction.
+             ;Input format: Any number of leading spaces or line feeds are
+             ;allowed, followed by '+', '-' or a digit as the first character,
+             ;after which digits are input until the first nondigit is
+             ;encountered. The status flags N,Z and V are set appropriately
+             ;by this DECI routine. The C status flag is not affected.
+             ;
+             oldNZVC: .EQUATE 14            ;Stack address of NZVC on interrupt
+             ;
+             total:   .EQUATE 10            ;Cumulative total of DECI number
+             valAscii:.EQUATE 8             ;Value(asciiCH)
+             isOvfl:  .EQUATE 6             ;Overflow boolean
+             isNeg:   .EQUATE 4             ;Negative boolean
+             state:   .EQUATE 2             ;State variable
+             temp:    .EQUATE 0             
+             ;
+             init:    .EQUATE 0             ;Enumerated values for state
+             sign:    .EQUATE 1             
+             digit:   .EQUATE 2             
+             ;
+FDC4  C000FE opcode30:LDA     0x00FE,i      ;Assert d, n, s, sf, x, sx, sxf
+FDC7  E1FC53          STA     addrMask,d    
+FDCA  16FCCA          CALL    assertAd      
+FDCD  16FD19          CALL    setAddr       ;Set address of trap operand
+FDD0  68000C          SUBSP   12,i          ;Allocate storage for locals
+FDD3  C00000          LDA     FALSE,i       ;isOvfl := FALSE
+FDD6  E30006          STA     isOvfl,s      
+FDD9  C00000          LDA     init,i        ;state := init
+FDDC  E30002          STA     state,s       
+FDDF  C00000          LDA     0,i           ;wordBuff := 0 for input
+FDE2  E1FC4F          STA     wordBuff,d    
+             ;
+FDE5  49FC50 do:      CHARI   byteBuff,d    ;Get asciiCh
+FDE8  C1FC4F          LDA     wordBuff,d    ;Set value(asciiCH)
+FDEB  90000F          ANDA    0x000F,i      
+FDEE  E30008          STA     valAscii,s    
+FDF1  C1FC4F          LDA     wordBuff,d    ;A = asciiCh throughout the loop
+FDF4  CB0002          LDX     state,s       ;switch (state)
+FDF7  1D              ASLX                  ;An address is two bytes
+FDF8  05FDFB          BR      stateJT,x     
+             ;
+FDFB  FE01   stateJT: .ADDRSS sInit         
+FDFD  FE5B            .ADDRSS sSign         
+FDFF  FE76            .ADDRSS sDigit        
+             ;
+FE01  B0002B sInit:   CPA     '+',i         ;if (asciiCh == '+')
+FE04  0CFE16          BRNE    ifMinus       
+FE07  C80000          LDX     FALSE,i       ;isNeg := FALSE
+FE0A  EB0004          STX     isNeg,s       
+FE0D  C80001          LDX     sign,i        ;state := sign
+FE10  EB0002          STX     state,s       
+FE13  04FDE5          BR      do            
+             ;
+FE16  B0002D ifMinus: CPA     '-',i         ;else if (asciiCh == '-')
+FE19  0CFE2B          BRNE    ifDigit       
+FE1C  C80001          LDX     TRUE,i        ;isNeg := TRUE
+FE1F  EB0004          STX     isNeg,s       
+FE22  C80001          LDX     sign,i        ;state := sign
+FE25  EB0002          STX     state,s       
+FE28  04FDE5          BR      do            
+             ;
+FE2B  B00030 ifDigit: CPA     '0',i         ;else if (asciiCh is a digit)
+FE2E  08FE4C          BRLT    ifWhite       
+FE31  B00039          CPA     '9',i         
+FE34  10FE4C          BRGT    ifWhite       
+FE37  C80000          LDX     FALSE,i       ;isNeg := FALSE
+FE3A  EB0004          STX     isNeg,s       
+FE3D  CB0008          LDX     valAscii,s    ;total := Value(asciiCh)
+FE40  EB000A          STX     total,s       
+FE43  C80002          LDX     digit,i       ;state := digit
+FE46  EB0002          STX     state,s       
+FE49  04FDE5          BR      do            
+             ;
+FE4C  B00020 ifWhite: CPA     ' ',i         ;else if (asciiCh is not a space
+FE4F  0AFDE5          BREQ    do            
+FE52  B0000A          CPA     '\n',i        ;or line feed)
+FE55  0CFF11          BRNE    deciErr       ;exit with DECI error
+FE58  04FDE5          BR      do            
+             ;
+FE5B  B00030 sSign:   CPA     '0',i         ;if asciiCh (is not a digit)
+FE5E  08FF11          BRLT    deciErr       
+FE61  B00039          CPA     '9',i         
+FE64  10FF11          BRGT    deciErr       ;exit with DECI error
+FE67  CB0008          LDX     valAscii,s    ;else total := Value(asciiCh)
+FE6A  EB000A          STX     total,s       
+FE6D  C80002          LDX     digit,i       ;state := digit
+FE70  EB0002          STX     state,s       
+FE73  04FDE5          BR      do            
+             ;
+FE76  B00030 sDigit:  CPA     '0',i         ;if (asciiCh is not a digit)
+FE79  08FEC7          BRLT    deciNorm      
+FE7C  B00039          CPA     '9',i         
+FE7F  10FEC7          BRGT    deciNorm      ;exit normaly
+FE82  C80001          LDX     TRUE,i        ;else X := TRUE for later assignmen
+FE85  C3000A          LDA     total,s       ;Multiply total by 10 as follows:
+FE88  1C              ASLA                  ;First, times 2
+FE89  12FE8F          BRV     ovfl1         ;If overflow then
+FE8C  04FE92          BR      L1            
+FE8F  EB0006 ovfl1:   STX     isOvfl,s      ;isOvfl := TRUE
+FE92  E30000 L1:      STA     temp,s        ;Save 2 * total in temp
+FE95  1C              ASLA                  ;Now, 4 * total
+FE96  12FE9C          BRV     ovfl2         ;If overflow then
+FE99  04FE9F          BR      L2            
+FE9C  EB0006 ovfl2:   STX     isOvfl,s      ;isOvfl := TRUE
+FE9F  1C     L2:      ASLA                  ;Now, 8 * total
+FEA0  12FEA6          BRV     ovfl3         ;If overflow then
+FEA3  04FEA9          BR      L3            
+FEA6  EB0006 ovfl3:   STX     isOvfl,s      ;isOvfl := TRUE
+FEA9  730000 L3:      ADDA    temp,s        ;Finally, 8 * total + 2 * total
+FEAC  12FEB2          BRV     ovfl4         ;If overflow then
+FEAF  04FEB5          BR      L4            
+FEB2  EB0006 ovfl4:   STX     isOvfl,s      ;isOvfl := TRUE
+FEB5  730008 L4:      ADDA    valAscii,s    ;A := 10 * total + valAscii
+FEB8  12FEBE          BRV     ovfl5         ;If overflow then
+FEBB  04FEC1          BR      L5            
+FEBE  EB0006 ovfl5:   STX     isOvfl,s      ;isOvfl := TRUE
+FEC1  E3000A L5:      STA     total,s       ;Update total
+FEC4  04FDE5          BR      do            
+             ;
+FEC7  C30004 deciNorm:LDA     isNeg,s       ;If isNeg then
+FECA  0AFEE3          BREQ    setNZ         
+FECD  C3000A          LDA     total,s       ;If total != 0x8000 then
+FED0  B08000          CPA     0x8000,i      
+FED3  0AFEDD          BREQ    L6            
+FED6  1A              NEGA                  ;Negate total
+FED7  E3000A          STA     total,s       
+FEDA  04FEE3          BR      setNZ         
+FEDD  C00000 L6:      LDA     FALSE,i       ;else -32768 is a special case
+FEE0  E30006          STA     isOvfl,s      ;isOvfl := FALSE
+             ;
+FEE3  DB000E setNZ:   LDBYTEX oldNZVC,s     ;Set NZ according to total result:
+FEE6  980001          ANDX    0x0001,i      ;First initialize NZV to 000
+FEE9  C3000A          LDA     total,s       ;If total is negative then
+FEEC  0EFEF2          BRGE    checkZ        
+FEEF  A80008          ORX     0x0008,i      ;set N to 1
+FEF2  B00000 checkZ:  CPA     0,i           ;If total is not zero then
+FEF5  0CFEFB          BRNE    setV          
+FEF8  A80004          ORX     0x0004,i      ;set Z to 1
+FEFB  C30006 setV:    LDA     isOvfl,s      ;If not isOvfl then
+FEFE  0AFF04          BREQ    storeFl       
+FF01  A80002          ORX     0x0002,i      ;set V to 1
+FF04  FB000E storeFl: STBYTEX oldNZVC,s     ;Store the NZVC flags
+             ;
+FF07  C3000A exitDeci:LDA     total,s       ;Put total in memory
+FF0A  E2FC55          STA     opAddr,n      
+FF0D  60000C          ADDSP   12,i          ;Deallocate locals
+FF10  58              RET0                  ;Return to trap handler
+             ;
+FF11  50000A deciErr: CHARO   '\n',i        
+FF14  C0FF21          LDA     deciMsg,i     ;Push address of message onto stack
+FF17  E3FFFE          STA     -2,s          
+FF1A  680002          SUBSP   2,i           
+FF1D  16FFE2          CALL    prntMsg       ;and print
+FF20  00              STOP                  ;Fatal error: program terminates
+             ;
+FF21  455252 deciMsg: .ASCII  "ERROR: Invalid DECI input\x00" 
+      4F523A 
+      20496E 
+      76616C 
+      696420 
+      444543 
+      492069 
+      6E7075 
+      7400   
+             ;
+             ;******* Opcode 0x38
+             ;The DECO instruction.
+             ;Output format: If the operand is negative, the algorithm prints
+             ;a single '-' followed by the magnitude. Otherwise it prints the
+             ;magnitude without a leading '+'. It suppresses leading zeros.
+             ;
+             remain:  .EQUATE 0             ;Remainder of value to output
+             chOut:   .EQUATE 2             ;Has a character been output yet?
+             place:   .EQUATE 4             ;Place value for division
+             ;
+FF3B  C000FF opcode38:LDA     0x00FF,i      ;Assert i, d, n, s, sf, x, sx, sxf
+FF3E  E1FC53          STA     addrMask,d    
+FF41  16FCCA          CALL    assertAd      
+FF44  16FD19          CALL    setAddr       ;Set address of trap operand
+FF47  680006          SUBSP   6,i           ;Allocate storage for locals
+FF4A  C2FC55          LDA     opAddr,n      ;A := oprnd
+FF4D  B00000          CPA     0,i           ;If oprnd is negative then
+FF50  0EFF57          BRGE    printMag      
+FF53  50002D          CHARO   '-',i         ;Print leading '-' and
+FF56  1A              NEGA                  ;make magnitude positive
+FF57  E30000 printMag:STA     remain,s      ;remain := abs(oprnd)
+FF5A  C00000          LDA     FALSE,i       ;Initialize chOut := FALSE
+FF5D  E30002          STA     chOut,s       
+FF60  C02710          LDA     10000,i       ;place := 10,000
+FF63  E30004          STA     place,s       
+FF66  16FF91          CALL    divide        ;Write 10,000's place
+FF69  C003E8          LDA     1000,i        ;place := 1,000
+FF6C  E30004          STA     place,s       
+FF6F  16FF91          CALL    divide        ;Write 1000's place
+FF72  C00064          LDA     100,i         ;place := 100
+FF75  E30004          STA     place,s       
+FF78  16FF91          CALL    divide        ;Write 100's place
+FF7B  C0000A          LDA     10,i          ;place := 10
+FF7E  E30004          STA     place,s       
+FF81  16FF91          CALL    divide        ;Write 10's place
+FF84  C30000          LDA     remain,s      ;Always write 1's place
+FF87  A00030          ORA     0x0030,i      ;Convert decimal to ASCII
+FF8A  F1FC50          STBYTEA byteBuff,d    
+FF8D  51FC50          CHARO   byteBuff,d    
+FF90  5E              RET6                  
+             ;
+             ;Subroutine to print the most significant decimal digit of the
+             ;remainder. It assumes that place (place2 here) contains the
+             ;decimal place value. It updates the remainder.
+             ;
+             remain2: .EQUATE 2             ;Stack addresses while executing a
+             chOut2:  .EQUATE 4             ;subroutine are greater by two beca
+             place2:  .EQUATE 6             ;the retAddr is on the stack
+             ;
+FF91  C30002 divide:  LDA     remain2,s     ;A := remainder
+FF94  C80000          LDX     0,i           ;X := 0
+FF97  830006 divLoop: SUBA    place2,s      ;Division by repeated subtraction
+FF9A  08FFA6          BRLT    writeNum      ;If remainder is negative then done
+FF9D  780001          ADDX    1,i           ;X := X + 1
+FFA0  E30002          STA     remain2,s     ;Store the new remainder
+FFA3  04FF97          BR      divLoop       
+             ;
+FFA6  B80000 writeNum:CPX     0,i           ;If X != 0 then
+FFA9  0AFFB5          BREQ    checkOut      
+FFAC  C00001          LDA     TRUE,i        ;chOut := TRUE
+FFAF  E30004          STA     chOut2,s      
+FFB2  04FFBC          BR      printDgt      ;and branch to print this digit
+FFB5  C30004 checkOut:LDA     chOut2,s      ;else if a previous char was output
+FFB8  0CFFBC          BRNE    printDgt      ;then branch to print this zero
+FFBB  58              RET0                  ;else return to calling routine
+             ;
+FFBC  A80030 printDgt:ORX     0x0030,i      ;Convert decimal to ASCII
+FFBF  E9FC4F          STX     wordBuff,d    ;for output
+FFC2  51FC50          CHARO   byteBuff,d    
+FFC5  58              RET0                  ;return to calling routine
+             ;
+             ;******* Opcode 0x40
+             ;The STRO instruction.
+             ;Outputs a null-terminated string from memory.
+             ;
+FFC6  C00016 opcode40:LDA     0x0016,i      ;Assert d, n, sf
+FFC9  E1FC53          STA     addrMask,d    
+FFCC  16FCCA          CALL    assertAd      
+FFCF  16FD19          CALL    setAddr       ;Set address of trap operand
+FFD2  C1FC55          LDA     opAddr,d      ;Push address of string to print
+FFD5  E3FFFE          STA     -2,s          
+FFD8  680002          SUBSP   2,i           
+FFDB  16FFE2          CALL    prntMsg       ;and print
+FFDE  600002          ADDSP   2,i           
+FFE1  58              RET0                  
+             ;
+             ;******* Print subroutine
+             ;Prints a string of ASCII bytes until it encounters a null
+             ;byte (eight zero bits). Assumes one parameter, which
+             ;contains the address of the message.
+             ;
+             msgAddr: .EQUATE 2             ;Address of message to print
+             ;
+FFE2  C80000 prntMsg: LDX     0,i           ;X := 0
+FFE5  C00000          LDA     0,i           ;A := 0
+FFE8  D70002 prntMore:LDBYTEA msgAddr,sxf   ;Test next char
+FFEB  0AFFF7          BREQ    exitPrnt      ;If null then exit
+FFEE  570002          CHARO   msgAddr,sxf   ;else print
+FFF1  780001          ADDX    1,i           ;X := X + 1 for next character
+FFF4  04FFE8          BR      prntMore      
+             ;
+FFF7  58     exitPrnt:RET0                  
+             ;
+             ;******* Vectors for System Memory Format
+FFF8  FBCF            .ADDRSS osRAM         ;User stack pointer
+FFFA  FC4F            .ADDRSS wordBuff      ;System stack pointer
+FFFC  FC57            .ADDRSS loader        ;Loader program counter
+FFFE  FC9B            .ADDRSS trap          ;Trap program counter
+             ;
+0000                  .END                  
+-------------------------------------------------------------------------------
+
+
+Symbol table
+--------------------------------------
+Symbol    Value        Symbol    Value
+--------------------------------------
+FALSE     0000         L1        FE92
+L2        FE9F         L3        FEA9
+L4        FEB5         L5        FEC1
+L6        FEDD         TRUE      0001
+addrD     FD3D         addrErr   FCE4
+addrI     FD33         addrJT    FD23
+addrMask  FC53         addrN     FD4A
+addrS     FD5A         addrSF    FD6A
+addrSX    FD8D         addrSXF   FDA0
+addrX     FD7D         assertAd  FCCA
+byteBuff  FC50         byteTemp  FC52
+chOut     0002         chOut2    0004
+checkOut  FFB5         checkZ    FEF2
+combine   FC88         deciErr   FF11
+deciMsg   FF21         deciNorm  FEC7
+digit     0002         divLoop   FF97
+divide    FF91         do        FDE5
+exitDeci  FF07         exitPrnt  FFF7
+getChar   FC5D         ifDigit   FE2B
+ifMinus   FE16         ifWhite   FE4C
+init      0000         isNeg     0004
+isOvfl    0006         loader    FC57
+loop      FCD6         msgAddr   0002
+nonUnJT   FCC2         nonUnary  FCB7
+oldIR     0009         oldIR4    000D
+oldNZVC   000E         oldPC4    0009
+oldSP4    000B         oldX4     0007
+opAddr    FC55         opcode24  FDB6
+opcode25  FDB7         opcode26  FDB8
+opcode27  FDB9         opcode28  FDBA
+opcode30  FDC4         opcode38  FF3B
+opcode40  FFC6         osRAM     FBCF
+ovfl1     FE8F         ovfl2     FE9C
+ovfl3     FEA6         ovfl4     FEB2
+ovfl5     FEBE         place     0004
+place2    0006         printDgt  FFBC
+printMag  FF57         prntMore  FFE8
+prntMsg   FFE2         remain    0000
+remain2   0002         return    FCC1
+sDigit    FE76         sInit     FE01
+sSign     FE5B         setAddr   FD19
+setNZ     FEE3         setV      FEFB
+shift     FC72         sign      0001
+state     0002         stateJT   FDFB
+stopLoad  FC9A         storeFl   FF04
+temp      0000         testAd    FCDD
+total     000A         trap      FC9B
+trapMsg   FCF4         unary     FCA7
+unaryJT   FCAF         valAscii  0008
+wordBuff  FC4F         wordTemp  FC51
+writeNum  FFA6         
+--------------------------------------

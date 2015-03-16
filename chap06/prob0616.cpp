@@ -1,0 +1,1 @@
+// File: prob0616.cpp// Computer Systems, Fourth Edition// Problem 6.16#include <iostream>using namespace std;int myAge;void putNext (int age) {   int nextYr;   nextYr = age + 1;   cout << "Age: " << age << endl;   cout << "Age next year: " << nextYr << endl;}int main () {   cin >> myAge;   putNext (myAge);   putNext (64);   return 0;}
